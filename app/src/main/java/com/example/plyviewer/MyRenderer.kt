@@ -13,9 +13,18 @@ import java.nio.IntBuffer
 import javax.microedition.khronos.opengles.GL10
 
 class MyRenderer(private val context: Context) : GLSurfaceView.Renderer {
-
     companion object {
         private const val TAG = "MyRenderer"
+    }
+
+    // Camera parameters (modifiable via gestures)
+    var cameraDistance = 3f
+    var cameraTranslateX = 0f
+    var cameraTranslateY = 0f
+    fun resetCamera() {
+        cameraDistance = 3f
+        cameraTranslateX = 0f
+        cameraTranslateY = 0f
     }
 
     private lateinit var vertexBuffer: FloatBuffer
@@ -23,7 +32,6 @@ class MyRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private var indexCount: Int = 0
     private var vertexCount: Int = 0
 
-    // Transformation matrices.
     private val modelMatrix = FloatArray(16)
     private val viewMatrix = FloatArray(16)
     private val projMatrix = FloatArray(16)
@@ -31,21 +39,17 @@ class MyRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
     private var program: Int = 0
 
-    // Light direction.
-    private val lightDirection = floatArrayOf(0.0f, 0.0f, 1.0f)
-
     override fun onSurfaceCreated(gl: GL10?, config: javax.microedition.khronos.egl.EGLConfig?) {
         GLES30.glClearColor(0.1f, 0.1f, 0.1f, 1.0f)
         GLES30.glEnable(GLES30.GL_DEPTH_TEST)
 
-        // (Removed glEnable(GL_PROGRAM_POINT_SIZE) and glPointSize calls.)
-
+        // Load and parse the PLY file.
         try {
             val inputStream = context.assets.open("model.ply")
             val plyModel: PlyModel = PlyParser().parse(inputStream)
-            vertexCount = plyModel.vertices.size / 3
+            vertexCount = plyModel.vertices.size / 7
             indexCount = plyModel.indices.size
-            Log.d(TAG, "Parsed $vertexCount vertices and ${indexCount / 3} faces")
+            Log.d(TAG, "Parsed $vertexCount vertices and ${if(indexCount==0) 0 else indexCount/3} faces")
 
             vertexBuffer = ByteBuffer.allocateDirect(plyModel.vertices.size * 4)
                 .order(ByteOrder.nativeOrder())
@@ -70,11 +74,6 @@ class MyRenderer(private val context: Context) : GLSurfaceView.Renderer {
         if (program == 0) {
             Log.e(TAG, "Failed to create shader program")
         }
-
-        Matrix.setLookAtM(viewMatrix, 0,
-            0f, 0f, 3f,
-            0f, 0f, 0f,
-            0f, 1f, 0f)
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
@@ -86,23 +85,42 @@ class MyRenderer(private val context: Context) : GLSurfaceView.Renderer {
     override fun onDrawFrame(gl: GL10?) {
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT or GLES30.GL_DEPTH_BUFFER_BIT)
 
+        // Update view matrix using camera parameters.
+        Matrix.setLookAtM(viewMatrix, 0,
+            cameraTranslateX, cameraTranslateY, cameraDistance,
+            cameraTranslateX, cameraTranslateY, 0f,
+            0f, 1f, 0f)
+
+        // Rotate model for demonstration.
         val angle = (System.currentTimeMillis() % 3600) * 0.1f
         Matrix.setRotateM(modelMatrix, 0, angle, 0f, 1f, 0f)
+        // Optionally scale the model (adjust as needed)
+        // Matrix.scaleM(modelMatrix, 0, 0.1f, 0.1f, 0.1f)
+
+        // Compute MVP: proj * view * model.
         Matrix.multiplyMM(mvpMatrix, 0, viewMatrix, 0, modelMatrix, 0)
         Matrix.multiplyMM(mvpMatrix, 0, projMatrix, 0, mvpMatrix, 0)
 
         GLES30.glUseProgram(program)
 
+        // Set up attributes:
+        // a_Position: first 3 floats out of 7.
         val posHandle = GLES30.glGetAttribLocation(program, "a_Position")
         GLES30.glEnableVertexAttribArray(posHandle)
-        GLES30.glVertexAttribPointer(posHandle, 3, GLES30.GL_FLOAT, false, 3 * 4, vertexBuffer)
+        GLES30.glVertexAttribPointer(posHandle, 3, GLES30.GL_FLOAT, false, 7 * 4, vertexBuffer)
 
+        // a_Color: next 4 floats.
+        val colorHandle = GLES30.glGetAttribLocation(program, "a_Color")
+        vertexBuffer.position(3)
+        GLES30.glEnableVertexAttribArray(colorHandle)
+        GLES30.glVertexAttribPointer(colorHandle, 4, GLES30.GL_FLOAT, false, 7 * 4, vertexBuffer)
+        vertexBuffer.position(0)
+
+        // Pass MVP matrix.
         val mvpHandle = GLES30.glGetUniformLocation(program, "u_MVPMatrix")
         GLES30.glUniformMatrix4fv(mvpHandle, 1, false, mvpMatrix, 0)
 
-        val lightHandle = GLES30.glGetUniformLocation(program, "u_LightDirection")
-        GLES30.glUniform3fv(lightHandle, 1, lightDirection, 0)
-
+        // Draw model: if there are faces, use glDrawElements; otherwise, glDrawArrays (as points).
         if (indexCount > 0) {
             GLES30.glDrawElements(GLES30.GL_TRIANGLES, indexCount, GLES30.GL_UNSIGNED_INT, indexBuffer)
         } else {
@@ -110,6 +128,8 @@ class MyRenderer(private val context: Context) : GLSurfaceView.Renderer {
         }
 
         GLES30.glDisableVertexAttribArray(posHandle)
+        GLES30.glDisableVertexAttribArray(colorHandle)
+
         Log.d(TAG, "Frame rendered at angle: $angle")
     }
 
@@ -147,28 +167,28 @@ class MyRenderer(private val context: Context) : GLSurfaceView.Renderer {
         return prog
     }
 
-    // Vertex shader with a fixed point size.
+    // Vertex shader: uses position and color; sets point size for points.
     private val vertexShaderCode = """
         #version 300 es
         uniform mat4 u_MVPMatrix;
         in vec3 a_Position;
+        in vec4 a_Color;
+        out vec4 v_Color;
         void main() {
             gl_Position = u_MVPMatrix * vec4(a_Position, 1.0);
-            gl_PointSize = 2.0;  // Set the size of points.
+            gl_PointSize = 3.0;
+            v_Color = a_Color;
         }
     """.trimIndent()
 
+    // Fragment shader: outputs the vertex color.
     private val fragmentShaderCode = """
         #version 300 es
         precision mediump float;
-        uniform vec3 u_LightDirection;
+        in vec4 v_Color;
         out vec4 fragColor;
         void main() {
-            float ambient = 0.3;
-            float diffuse = max(dot(normalize(vec3(0.0, 0.0, 1.0)), normalize(u_LightDirection)), 0.0);
-            vec3 baseColor = vec3(0.6, 0.8, 1.0);
-            vec3 color = baseColor * (ambient + diffuse);
-            fragColor = vec4(color, 1.0);
+            fragColor = v_Color;
         }
     """.trimIndent()
 }

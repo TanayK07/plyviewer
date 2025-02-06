@@ -7,7 +7,7 @@ import java.io.InputStreamReader
 
 class PlyParser {
     data class PlyModel(
-        val vertices: FloatArray,
+        val vertices: FloatArray,  // Each vertex: [x, y, z, r, g, b, a]
         val indices: IntArray
     )
 
@@ -23,27 +23,30 @@ class PlyParser {
             val tokens = line.trim().split("\\s+".toRegex())
             if (!headerEnded) {
                 when {
-                    tokens.isNotEmpty() && tokens[0] == "element" && tokens[1] == "vertex" -> {
+                    tokens.isNotEmpty() && tokens[0] == "element" && tokens[1] == "vertex" ->
                         vertexCount = tokens[2].toInt()
-                    }
-                    tokens.isNotEmpty() && tokens[0] == "element" && tokens[1] == "face" -> {
+                    tokens.isNotEmpty() && tokens[0] == "element" && tokens[1] == "face" ->
                         faceCount = tokens[2].toInt()
-                    }
-                    tokens.isNotEmpty() && tokens[0] == "end_header" -> {
+                    tokens.isNotEmpty() && tokens[0] == "end_header" ->
                         headerEnded = true
-                    }
                 }
             } else {
                 if (vertexCount > 0) {
-                    // Expect at least 3 floats (x, y, z)
-                    if (tokens.size >= 3) {
+                    if (tokens.size >= 10) {
+                        // Position (x,y,z)
                         vertexList.add(tokens[0].toFloat())
                         vertexList.add(tokens[1].toFloat())
                         vertexList.add(tokens[2].toFloat())
+                        // Skip normals (tokens[3..5])
+                        // Color: tokens[6..9], convert from 0-255 to 0-1.
+                        vertexList.add(tokens[6].toFloat() / 255f)
+                        vertexList.add(tokens[7].toFloat() / 255f)
+                        vertexList.add(tokens[8].toFloat() / 255f)
+                        vertexList.add(tokens[9].toFloat() / 255f)
                     }
                     vertexCount--
                 } else if (faceCount > 0) {
-                    // Expect the first token is the number of vertices (assume 3 for triangles).
+                    // Expect first token = number of vertices in face (assume 3)
                     val count = tokens[0].toInt()
                     if (count == 3 && tokens.size >= 4) {
                         indexList.add(tokens[1].toInt())
@@ -54,7 +57,7 @@ class PlyParser {
                 }
             }
         }
-        Log.d("PlyParser", "Parsed ${vertexList.size / 3} vertices and ${indexList.size / 3} faces")
+        Log.d("PlyParser", "Parsed ${vertexList.size / 7} vertices and ${if(indexList.isEmpty()) 0 else indexList.size / 3} faces")
         return PlyModel(vertices = vertexList.toFloatArray(), indices = indexList.toIntArray())
     }
 }
