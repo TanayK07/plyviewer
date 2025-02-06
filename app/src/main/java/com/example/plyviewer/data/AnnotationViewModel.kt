@@ -34,4 +34,10 @@ class AnnotationViewModel @Inject constructor(
             loadAnnotations()
         }
     }
+    fun clearAllAnnotations() {
+        viewModelScope.launch {
+            repository.deleteAll()
+            _annotations.value = emptyList()
+        }
+    }
 }

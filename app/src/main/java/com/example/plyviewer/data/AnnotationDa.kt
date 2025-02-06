@@ -12,4 +12,7 @@ interface AnnotationDao {
 
     @Query("SELECT * FROM annotations")
     suspend fun getAll(): List<AnnotationEntity>
+
+    @Query("DELETE FROM annotations")
+    suspend fun deleteAll()
 }

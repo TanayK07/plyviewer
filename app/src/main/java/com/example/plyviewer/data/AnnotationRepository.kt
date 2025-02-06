@@ -8,4 +8,6 @@ import javax.inject.Singleton
 class AnnotationRepository @Inject constructor(private val dao: AnnotationDao) {
     suspend fun insert(annotation: AnnotationEntity) = dao.insert(annotation)
     suspend fun getAll() = dao.getAll()
+    suspend fun deleteAll() = dao.deleteAll()
+
 }
