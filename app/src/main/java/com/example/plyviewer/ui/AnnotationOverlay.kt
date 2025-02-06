@@ -2,7 +2,9 @@ package com.example.plyviewer.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -11,28 +13,32 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
-import com.example.plyviewer.data.AnnotationEntity
+import androidx.compose.ui.unit.sp
 import com.example.plyviewer.AnnotationViewModel
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.material3.OutlinedTextField
+import com.example.plyviewer.data.AnnotationEntity
 import kotlin.math.abs
 import kotlin.math.min
+
 @Composable
 fun AnnotationOverlay(viewModel: AnnotationViewModel) {
     var annotationMode by remember { mutableStateOf(false) }
     var currentRect by remember { mutableStateOf<Rect?>(null) }
 
-    // Observe
+    // Listen to the DB's stored annotations
     val annotations by viewModel.annotations.collectAsState()
 
-    // Controls
+    // For shape and label
     var shapeType by remember { mutableStateOf("rect") }
-    var labelField by remember { mutableStateOf("") }  // user input
+    var labelField by remember { mutableStateOf("") }
     val labelText = labelField.ifBlank { "No Label" }
 
     Box(modifier = Modifier.fillMaxSize()) {
+
+        // 1) If annotationMode is ON, intercept single-drag gestures to create shapes
         if (annotationMode) {
             Box(
                 modifier = Modifier
@@ -56,7 +62,7 @@ fun AnnotationOverlay(viewModel: AnnotationViewModel) {
                                     val w = abs(r.width)
                                     val h = abs(r.height)
                                     if (w > 10 || h > 10) {
-                                        // Save annotation
+                                        // Insert annotation with the label
                                         viewModel.addAnnotation(
                                             AnnotationEntity(
                                                 shape = shapeType,
@@ -78,24 +84,25 @@ fun AnnotationOverlay(viewModel: AnnotationViewModel) {
                 DrawAnnotations(annotations, currentRect, shapeType)
             }
         } else {
-            // Not in annotation mode => just draw existing
+            // 2) Otherwise just draw existing shapes, so pinch/pan/rotate pass through
             Box(modifier = Modifier.fillMaxSize()) {
                 DrawAnnotations(annotations, null, shapeType)
             }
         }
 
-        // UI for controls
+        // 3) UI Controls
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(16.dp)
         ) {
+            // Toggle annotation mode
             Button(onClick = { annotationMode = !annotationMode }) {
                 Text(if (annotationMode) "Exit Annotation" else "Enter Annotation")
             }
             Spacer(Modifier.height(8.dp))
 
-            // shape type toggles
+            // Shape type toggles
             Row {
                 Button(onClick = { shapeType = "line" }) { Text("Line") }
                 Spacer(Modifier.width(8.dp))
@@ -103,7 +110,7 @@ fun AnnotationOverlay(viewModel: AnnotationViewModel) {
             }
             Spacer(Modifier.height(8.dp))
 
-            // label input
+            // Label input (applies to next annotation)
             OutlinedTextField(
                 value = labelField,
                 onValueChange = { labelField = it },
@@ -111,7 +118,7 @@ fun AnnotationOverlay(viewModel: AnnotationViewModel) {
             )
             Spacer(Modifier.height(8.dp))
 
-            // reset
+            // Reset button
             Button(onClick = { viewModel.clearAllAnnotations() }) {
                 Text("Reset All Annotations")
             }
@@ -126,7 +133,12 @@ fun DrawAnnotations(
     shapeType: String
 ) {
     Canvas(modifier = Modifier.fillMaxSize()) {
-        // draw existing
+        val textPaint = android.graphics.Paint().apply {
+            color = android.graphics.Color.WHITE
+            textSize = 36f
+            textAlign = android.graphics.Paint.Align.CENTER
+        }
+        // Draw existing from DB
         annotations.forEach { ann ->
             if (ann.shape == "line") {
                 // interpret (x, y, width, height) as start->end
@@ -135,6 +147,15 @@ fun DrawAnnotations(
                     start = Offset(ann.x, ann.y),
                     end = Offset(ann.width, ann.height),
                     strokeWidth = 8f
+                )
+                // label in the middle
+                val midX = (ann.x + ann.width) / 2f
+                val midY = (ann.y + ann.height) / 2f
+                drawContext.canvas.nativeCanvas.drawText(
+                    ann.label,
+                    midX,
+                    midY,
+                    textPaint
                 )
             } else { // "rect"
                 val left = min(ann.x, ann.width)
@@ -146,10 +167,18 @@ fun DrawAnnotations(
                     topLeft = Offset(left, top),
                     size = Size(w, h)
                 )
+                // label in center
+                val midX = left + w / 2f
+                val midY = top + h / 2f
+                drawContext.canvas.nativeCanvas.drawText(
+                    ann.label,
+                    midX,
+                    midY,
+                    textPaint
+                )
             }
         }
-
-        // if user is dragging
+        // In-progress shape
         currentRect?.let { r ->
             if (shapeType == "line") {
                 drawLine(
