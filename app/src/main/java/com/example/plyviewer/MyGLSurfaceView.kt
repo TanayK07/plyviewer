@@ -2,6 +2,7 @@ package com.example.plyviewer
 
 import android.content.Context
 import android.opengl.GLSurfaceView
+import android.opengl.Matrix
 import android.util.Log
 import android.view.GestureDetector
 import android.view.MotionEvent
@@ -123,6 +124,69 @@ class MyGLSurfaceView(context: Context) : GLSurfaceView(context) {
         }
         return true
     }
+
+    // Inside the SimpleOnGestureListener:
+    fun onSingleTapUp(e: MotionEvent): Boolean {
+        Log.d("MyGLSurfaceView", "Single tap at ${e.x},${e.y}")
+        pick3D(e.x, e.y)
+        return super.onSingleTapUp(e)
+    }
+
+    private fun pick3D(screenX: Float, screenY: Float) {
+        val width = this.width.toFloat()
+        val height = this.height.toFloat()
+
+        // Step 1: Convert to normalized device coords
+        val ndcX = (2f * screenX / width) - 1f
+        val ndcY = 1f - (2f * screenY / height)
+
+        // Step 2: Build MVP = proj * view * model
+        val mvp = FloatArray(16)
+        val temp = FloatArray(16)
+        Matrix.multiplyMM(temp, 0, renderer.viewMatrix, 0, renderer.modelMatrix, 0)
+        Matrix.multiplyMM(mvp, 0, renderer.projMatrix, 0, temp, 0)
+
+        val invertedMVP = FloatArray(16)
+        if (!Matrix.invertM(invertedMVP, 0, mvp, 0)) {
+            Log.e("MyGLSurfaceView", "Failed to invert MVP matrix.")
+            return
+        }
+
+        // Step 3: unproject near, far
+        val nearVec4 = floatArrayOf(ndcX, ndcY, -1f, 1f)
+        Matrix.multiplyMV(nearVec4, 0, invertedMVP, 0, nearVec4, 0)
+        val nearW = nearVec4[3]
+        nearVec4[0] /= nearW
+        nearVec4[1] /= nearW
+        nearVec4[2] /= nearW
+
+        val farVec4 = floatArrayOf(ndcX, ndcY, 1f, 1f)
+        Matrix.multiplyMV(farVec4, 0, invertedMVP, 0, farVec4, 0)
+        val farW = farVec4[3]
+        farVec4[0] /= farW
+        farVec4[1] /= farW
+        farVec4[2] /= farW
+
+        val nearPoint = Vec3(nearVec4[0], nearVec4[1], nearVec4[2])
+        val farPoint = Vec3(farVec4[0], farVec4[1], farVec4[2])
+
+        val rayDir = (farPoint - nearPoint).normalized()
+
+        val result = renderer.intersectRay(nearPoint, rayDir)
+        if (result.hit) {
+            Log.d("MyGLSurfaceView", "Hit the mesh at ${result.point} with normal ${result.normal}")
+
+            // We want to store in DB.
+            // But we need a reference to My3DAnnotationViewModel.
+            // Typically, you'd pass it from your Activity or something.
+            // For demonstration, let's just do a callback or store a static reference.
+//            val myPickCallback = null
+//            myPickCallback?.onPick(result.point)
+        } else {
+            Log.d("MyGLSurfaceView", "No intersection with the mesh.")
+        }
+    }
+
 
     private fun calculateRotationAngle(event: MotionEvent): Float {
         val x0 = event.getX(0)
