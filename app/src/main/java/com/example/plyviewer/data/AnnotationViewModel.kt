@@ -40,4 +40,11 @@ class AnnotationViewModel @Inject constructor(
             _annotations.value = emptyList()
         }
     }
+    fun updateAnnotation(entity: AnnotationEntity) {
+        viewModelScope.launch {
+            repository.insert(entity) // Because it's @Insert(onConflict=REPLACE)
+            loadAnnotations()
+        }
+    }
+
 }
